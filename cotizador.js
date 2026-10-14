@@ -1,303 +1,159 @@
-/* ============================================================
-   Cotizador Clean Center · lógica
-   La configuración se puede sobrescribir desde Webflow (o desde el HTML) con:
-     <script>window.CC_CONFIG = { NOTIFY_EMAIL: '...', WEBHOOK_URL: '...' };</script>
-   puesto ANTES de cargar este archivo. Así los datos sensibles no viven en el repositorio.
-   ============================================================ */
-(function () {
-  'use strict';
+(function(){
+'use strict';
+var CFG=Object.assign({
+  EMAIL_ENDPOINT:'',        // URL del Web App de Google Apps Script (ver LEEME)
+  SHOW_HEADER_FOOTER:true,  // false en Webflow si el sitio ya trae header/footer
+  LOAD_FONTS:true,          // carga Barlow Condensed + Inter desde Google Fonts
+  LOGOS:[],                 // URLs de logos de clientes (franja animada). Vacío = no se muestra
+  IMAGES:{},                // fotos: {'cat-aspiradoras':'url', 'sub-aspiradoras-verticales':'url'}
+  MOUNT:'#cc-mount'
+},window.CC_CONFIG||{});
 
-  var SCRIPT = document.currentScript || document.querySelector('script[src*="cotizador"]');
-  var BASE = '';
-  try { if (SCRIPT && SCRIPT.src) BASE = new URL('./', SCRIPT.src).href; } catch (e) {}
+var cs=document.currentScript,BASE='';
+if(cs&&cs.src)BASE=cs.src.replace(/[^\/]*$/,'');
+var A={logo:BASE+'assets/logo.png',logoW:BASE+'assets/logo-blanco.png',diagram:BASE+'assets/solucion-total.png',video:BASE+'assets/hero.mp4',poster:BASE+'assets/poster.jpg'};
+Object.assign(A,CFG.ASSETS||{});
 
-  /* ---------------- CONFIGURACIÓN ---------------- */
-  var CONFIG = {
-    // Correo que recibe cada cotización (vía FormSubmit.co). La primera solicitud dispara un
-    // correo de activación a esa dirección: hay que dar clic en el enlace.
-    // Tip: después de activar, FormSubmit da un "alias" aleatorio; puedes ponerlo aquí
-    // en lugar del correo para que la dirección no quede visible en el código.
-    NOTIFY_EMAIL: '',
-    EMAIL_SUBJECT: 'Nueva cotización Clean Center',
-    COPY_TO_CLIENT: false,           // true = el prospecto recibe copia en su correo
+var CATS=[
+ {id:'aspiradoras',name:'Aspiradoras',desc:'Para polvo y líquidos, en uso ligero o industrial.',subs:['Verticales','Húmedo / seco','Canasta','Mochila','Hombre atrás','Hombre a bordo']},
+ {id:'lava',name:'Lava Alfombras',desc:'Extracción y lavado profundo de alfombras y tapicería.',subs:['Desmanchado','Encapsulado','Extractor mediano','Extractor grande','Hombre atrás','Hombre a bordo']},
+ {id:'restregadoras',name:'Restregadoras',desc:'Lavan y secan pisos duros en una sola pasada.',subs:['Vertical','Áreas reducidas','Hombre a bordo','Hombre atrás','Industriales']},
+ {id:'rotativos',name:'Rotativos',desc:'Pulido, abrillantado y mantenimiento de pisos.',subs:['Pulidoras','Burnisher','Orbitales']},
+ {id:'barredoras',name:'Barredoras',desc:'Barrido de áreas amplias, interiores y exteriores.',subs:['Mecánicas','Hombre atrás','Hombre a bordo','Industriales']},
+ {id:'control',name:'Control',desc:'Equipos de control para tu operación de limpieza.',subs:['Ctrl. de Humedad','Ctrl. de Olores','Ctrl. de Chicles']}
+];
+var sel={},sent=false,sending=false,sentCats='',sentName='',sentFolio='';
 
-    // Fase 2 (Pipedrive): webhook de Make / Zapier / n8n. Vacío = no se envía.
-    WEBHOOK_URL: '',
+function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]})}
+function subId(c,s){return 'sub-'+c+'-'+s.toLowerCase().replace(/[^a-z]+/g,'-')}
+function find(id){return CATS.filter(function(c){return c.id===id})[0]}
+function count(){return Object.keys(sel).reduce(function(t,k){return t+sel[k].length},0)}
+function ids(){return CATS.filter(function(c){return sel[c.id]}).map(function(c){return c.id})}
 
-    SHOW_HEADER_FOOTER: true,        // false si el sitio (Webflow) ya tiene su propio menú y pie
-    LOAD_FONTS: true,                // false si el sitio ya carga Lato y Montserrat
+var ICON='<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m21 15-5-5L5 21"/></svg>';
+function slot(id,label,style){
+  var u=(CFG.IMAGES||{})[id];
+  if(u)return '<div class="cc-slot cc-has" style="'+style+'"><img src="'+esc(u)+'" alt="'+esc(label)+'" loading="lazy"></div>';
+  return '<div class="cc-slot" style="'+style+'">'+ICON+'<span>'+esc(label)+'</span></div>';
+}
 
-    // Archivos de imagen/video. Por defecto salen de la carpeta "assets" junto a este archivo.
-    ASSETS: BASE ? { logo: BASE + 'assets/logo.png', logoWhite: BASE + 'assets/logo-blanco.png', video: BASE + 'assets/hero.mp4', poster: BASE + 'assets/poster.jpg' } : { logo: '', logoWhite: '', video: '', poster: '' },
+var L={
+ lbl:'font-size:13px;letter-spacing:.16em;text-transform:uppercase;font-weight:600;',
+ field:'display:flex;flex-direction:column;gap:6px;font-size:14px;font-weight:600;color:var(--cc-ink-2)',
+ inp:'font:inherit;font-weight:400;font-size:16px;padding:14px 16px;border:1px solid var(--cc-line);border-radius:12px;outline:none;color:var(--cc-ink)'
+};
 
-    LOGOS: [],                       // ['https://.../cliente1.png', ...]  (vacío = no se muestra)
-    IMAGES: {}                       // fotos por categoría: { aspiradoras: 'https://.../foto.jpg', ... }
-  };
-  var USER = window.CC_CONFIG || {};
-  Object.keys(USER).forEach(function (k) {
-    if ((k === 'ASSETS' || k === 'IMAGES') && USER[k]) { for (var j in USER[k]) CONFIG[k][j] = USER[k][j]; }
-    else CONFIG[k] = USER[k];
+function logosHTML(){
+  var l=CFG.LOGOS||[];if(!l.length)return '';
+  var item=function(u){return '<img src="'+esc(u)+'" alt="" style="flex:none;height:72px;width:auto;max-width:180px;object-fit:contain">'};
+  var row=l.map(item).join('');
+  return '<section style="padding:48px 0;background:#fff;border-bottom:1px solid var(--cc-line-soft);overflow:hidden"><div style="text-align:center;'+L.lbl+'color:var(--cc-ink-3);margin:0 20px 28px">Empresas que confían en Clean Center · 30 años en el mercado</div><div style="display:flex;width:max-content;gap:24px;animation:ccmarquee 40s linear infinite;padding-left:24px">'+row+row+'</div></section>';
+}
+
+function shell(){
+ var hdr=CFG.SHOW_HEADER_FOOTER?'<header style="position:sticky;top:0;z-index:20;display:flex;align-items:center;justify-content:space-between;gap:10px;padding:12px clamp(14px,5vw,64px);background:#fff;border-bottom:1px solid var(--cc-line-soft)"><img src="'+A.logo+'" alt="Clean Center" style="height:clamp(32px,8vw,44px);width:auto;flex:none"><nav style="display:flex;align-items:center;gap:clamp(12px,3vw,28px);font-size:14px;font-weight:500"><a href="#solucion360" style="color:var(--cc-ink-2);text-decoration:none">Somos</a><a href="#catalogo" style="color:var(--cc-ink-2);text-decoration:none">Equipos</a><a href="#cotizar" style="display:inline-flex;align-items:center;gap:8px;background:var(--cc-orange);color:#fff;text-decoration:none;padding:10px 16px;border-radius:999px;font-weight:700;white-space:nowrap">Cotizar <span id="cc-count"></span></a></nav></header>':'';
+ var ftr=CFG.SHOW_HEADER_FOOTER?'<footer style="background:var(--cc-black);color:#fff;padding:32px clamp(20px,5vw,64px);display:flex;flex-wrap:wrap;gap:16px;justify-content:space-between;align-items:center"><img src="'+A.logoW+'" alt="Clean Center" style="height:40px;width:auto"><span style="font-family:var(--cc-font-condensed);font-weight:700;letter-spacing:.06em;font-size:18px">WWW.CLEANCENTER.COM.MX</span></footer>':'';
+ return '<div style="background:#fff;min-height:100vh;font-family:var(--cc-font-sans);color:var(--cc-ink)">'+hdr+
+ '<section style="background:var(--cc-black);color:#fff;padding:clamp(56px,9vw,120px) clamp(20px,5vw,64px);position:relative;overflow:hidden"><div style="position:absolute;inset:0;background:repeating-linear-gradient(115deg,transparent 0 46px,rgba(239,118,34,.07) 46px 47px)"></div><div style="position:relative;max-width:1280px;margin:0 auto;display:grid;grid-template-columns:repeat(auto-fit,minmax(min(300px,100%),1fr));gap:48px;align-items:center"><div><div style="'+L.lbl+'color:var(--cc-orange);margin-bottom:20px">Equipos · Catálogo 2026</div><h1 style="margin:0;font-family:var(--cc-font-condensed);font-weight:800;text-transform:uppercase;font-size:clamp(52px,8vw,112px);line-height:.92;letter-spacing:-.02em;color:#fff">El equipo <span style="color:var(--cc-orange)">correcto</span> para tu limpieza</h1><p style="margin:28px 0 0;font-size:19px;line-height:1.5;max-width:520px;color:#E8EDF9">Elige los equipos que necesitas, déjanos tus datos y te enviamos tu cotización.</p><div style="display:flex;gap:14px;margin-top:36px;flex-wrap:wrap"><a href="#catalogo" style="background:var(--cc-orange);color:#fff;text-decoration:none;padding:16px 32px;border-radius:999px;font-weight:700;font-size:16px">Elegir equipos</a></div></div><div style="position:relative;aspect-ratio:4/3;border-radius:16px;overflow:hidden;background:repeating-linear-gradient(135deg,#15181f 0 14px,#101319 14px 28px);border:1px solid #2a3142"><video src="'+A.video+'" poster="'+A.poster+'" autoplay muted loop playsinline preload="metadata" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover"></video></div></div></section>'+
+ logosHTML()+
+ '<section id="solucion360" style="padding:clamp(36px,5vw,64px) clamp(20px,5vw,64px);background:#fff"><div style="max-width:1280px;margin:0 auto;display:grid;grid-template-columns:repeat(auto-fit,minmax(min(320px,100%),1fr));gap:40px;align-items:center"><div><div style="'+L.lbl+'color:var(--cc-orange)">Solución 360</div><h2 style="margin:10px 0 16px;font-family:var(--cc-font-condensed);font-weight:800;text-transform:uppercase;font-size:clamp(36px,4.5vw,56px);line-height:.92;letter-spacing:-.02em;color:var(--cc-blue-900)">Mi solución <span style="color:var(--cc-orange)">total</span> de limpieza</h2><p style="margin:0 0 12px;font-size:17px;line-height:1.5;color:var(--cc-ink-2);max-width:520px;text-align:justify;hyphens:auto">Un solo proveedor para todo el ciclo de limpieza. Además de equipos, te acompañamos con productos, accesorios, refacciones, garantías, servicio técnico, post venta, asesoría y capacitación.</p><p style="margin:0 0 24px;font-size:17px;line-height:1.5;color:var(--cc-ink-2);max-width:520px;text-align:justify;hyphens:auto">Tú eliges el equipo; nosotros respaldamos tu operación.</p><a href="#catalogo" style="display:inline-block;background:var(--cc-blue);color:#fff;text-decoration:none;padding:15px 30px;border-radius:999px;font-weight:700;font-size:16px">Ver equipos</a></div><img src="'+A.diagram+'" alt="Solución Total: equipos, productos, accesorios, garantías, post venta, refacciones, servicio técnico, capacitación, capacitación virtual y asesoría" style="width:100%;max-width:475px;justify-self:center;height:auto;margin:-30px 0"></div></section>'+
+ '<section id="catalogo" style="padding:clamp(56px,8vw,112px) clamp(20px,5vw,64px);background:var(--cc-blue-10)"><div style="max-width:1280px;margin:0 auto"><div style="'+L.lbl+'color:var(--cc-blue)">Paso 1</div><h2 style="margin:10px 0 12px;font-family:var(--cc-font-condensed);font-weight:800;text-transform:uppercase;font-size:clamp(36px,5vw,64px);line-height:.95;color:var(--cc-blue-900)">Selecciona tus equipos</h2><p style="margin:0 0 44px;font-size:17px;color:var(--cc-ink-3);max-width:620px;line-height:1.5">Marca uno o varios equipos de cualquier categoría.</p><div id="cc-cards" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(min(340px,100%),1fr));gap:24px"></div></div></section>'+
+ '<section id="cotizar" style="padding:clamp(56px,8vw,112px) clamp(20px,5vw,64px);background:#fff"><div style="max-width:1280px;margin:0 auto;display:grid;grid-template-columns:repeat(auto-fit,minmax(min(320px,100%),1fr));gap:48px"><div><div style="'+L.lbl+'color:var(--cc-blue)">Paso 2</div><h2 style="margin:10px 0 24px;font-family:var(--cc-font-condensed);font-weight:800;text-transform:uppercase;font-size:clamp(36px,5vw,64px);line-height:.95;color:var(--cc-blue-900)">Solicita tu cotización</h2><div style="background:var(--cc-blue-10);border-radius:16px;padding:24px"><div style="'+L.lbl+'color:var(--cc-ink-3);margin-bottom:14px">Tu selección</div><p id="cc-empty" style="margin:0;font-size:15px;color:var(--cc-ink-3);line-height:1.5">Aún no has elegido equipos. <a href="#catalogo">Volver al catálogo</a></p><div id="cc-sum" style="display:flex;flex-direction:column;gap:12px"></div></div></div>'+
+ '<div><div id="cc-ok" hidden style="background:var(--cc-blue);color:#fff;border-radius:16px;padding:40px;flex-direction:column;gap:14px"><div style="'+L.lbl+'color:var(--cc-orange-300)">Solicitud enviada</div><h3 id="cc-okh" style="margin:0;font-family:var(--cc-font-condensed);font-weight:800;text-transform:uppercase;font-size:44px;line-height:.95;color:#fff"></h3><p id="cc-okp" style="margin:0;font-size:17px;line-height:1.5"></p><button type="button" id="cc-reset" style="align-self:flex-start;margin-top:10px;cursor:pointer;font:inherit;font-weight:700;padding:12px 24px;border-radius:999px;border:2px solid #fff;background:transparent;color:#fff">Nueva cotización</button></div>'+
+ '<form id="cc-form" novalidate style="display:flex;flex-direction:column;gap:18px"><label style="'+L.field+'">Nombre<input name="nombre" autocomplete="name" placeholder="Tu nombre completo" style="'+L.inp+'"></label><label style="'+L.field+'">Empresa<input name="empresa" autocomplete="organization" placeholder="Nombre de tu empresa" style="'+L.inp+'"></label><div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(min(200px,100%),1fr));gap:18px"><label style="'+L.field+'">Correo<input name="correo" type="email" autocomplete="email" placeholder="correo@empresa.com" style="'+L.inp+'"></label><label style="'+L.field+'">Teléfono<input name="telefono" type="tel" autocomplete="tel" placeholder="55 0000 0000" style="'+L.inp+'"></label></div><label style="'+L.field+'">Comentarios (opcional)<textarea name="mensaje" rows="3" placeholder="Cantidad, superficie a limpiar, uso…" style="'+L.inp+';resize:vertical"></textarea></label><div class="cc-hp" aria-hidden="true"><label>No llenar<input name="website" tabindex="-1" autocomplete="off"></label></div><div id="cc-err" role="alert" hidden style="font-size:14px;color:var(--cc-red-700);font-weight:500"></div><button type="submit" id="cc-submit" class="cc-hover-o" style="cursor:pointer;font:inherit;font-weight:700;font-size:17px;padding:17px 32px;border-radius:999px;border:0;background:var(--cc-orange);color:#fff;align-self:flex-start">Solicitar cotización</button></form></div></div></section>'+
+ ftr+
+ '<div id="cc-bar" hidden style="position:fixed;left:0;right:0;margin:0 auto;width:fit-content;bottom:20px;z-index:30;align-items:center;gap:20px;background:var(--cc-blue-900);color:#fff;padding:12px 12px 12px 26px;border-radius:999px;box-shadow:0 12px 32px rgba(0,0,0,.28);max-width:calc(100vw - 24px)"><span id="cc-bartxt" style="font-size:15px;font-weight:500"></span><a href="#cotizar" style="background:var(--cc-orange);color:#fff;text-decoration:none;padding:12px 24px;border-radius:999px;font-weight:700;font-size:15px;white-space:nowrap">Cotizar</a></div></div>';
+}
+
+var root,$=function(s){return root.querySelector(s)};
+
+function renderCards(){
+ var focus=document.activeElement&&document.activeElement.getAttribute&&document.activeElement.getAttribute('data-k');
+ $('#cc-cards').innerHTML=CATS.map(function(c){
+  var on=!!sel[c.id];
+  var subs=c.subs.map(function(s){
+   var sOn=(sel[c.id]||[]).indexOf(s)>-1,id=subId(c.id,s);
+   return '<div style="display:flex;flex-direction:column;border-radius:12px;overflow:hidden;border:2px solid '+(sOn?'#0047BA':'#DCE0EA')+';background:#fff"><div style="position:relative;aspect-ratio:4/3;background:#F6F8FC">'+slot(id,s,'')+'</div><button type="button" class="cc-sub-btn" data-c="'+c.id+'" data-s="'+esc(s)+'" data-k="'+c.id+'|'+esc(s)+'" aria-pressed="'+sOn+'" style="cursor:pointer;font:inherit;font-size:13px;font-weight:600;display:flex;align-items:center;justify-content:space-between;gap:6px;padding:9px 10px;border:0;background:'+(sOn?'#E8EDF9':'#fff')+';color:'+(sOn?'#002B70':'#2A3142')+';text-align:left"><span>'+esc(s)+'</span><span style="flex:none;width:18px;height:18px;border-radius:999px;border:2px solid '+(sOn?'#0047BA':'#DCE0EA')+';background:'+(sOn?'#0047BA':'transparent')+';color:#fff;font-size:11px;line-height:14px;text-align:center">'+(sOn?'✓':'')+'</span></button></div>';
+  }).join('');
+  return '<article style="background:#fff;border-radius:16px;overflow:hidden;display:flex;flex-direction:column;box-shadow:'+(on?'0 8px 28px rgba(0,71,186,.18)':'0 2px 12px rgba(14,19,32,.06)')+';outline:'+(on?'3px solid #0047BA':'3px solid transparent')+';transition:box-shadow .22s,outline-color .22s"><div style="aspect-ratio:16/9;background:repeating-linear-gradient(135deg,#F6F8FC 0 14px,#EEF1F8 14px 28px);position:relative;display:flex;align-items:flex-end;padding:14px 16px;font-family:var(--cc-font-mono);font-size:11px;color:var(--cc-ink-4)">'+slot('cat-'+c.id,'Foto: '+c.name,'')+'</div><div style="padding:22px 22px 24px;display:flex;flex-direction:column;gap:14px;flex:1"><div><h3 style="margin:0;font-size:24px;font-weight:700;color:var(--cc-blue-900)">'+esc(c.name)+'</h3><p style="margin:6px 0 0;font-size:15px;line-height:1.45;color:var(--cc-ink-3)">'+esc(c.desc)+'</p></div><div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:12px">'+subs+'</div></div></article>';
+ }).join('');
+ if(focus){var el=$('[data-k="'+focus.replace(/"/g,'\\"')+'"]');if(el)el.focus({preventScroll:true})}
+}
+function renderSummary(){
+ var n=count(),list=ids();
+ $('#cc-empty').hidden=n>0;
+ $('#cc-sum').innerHTML=list.map(function(id){var c=find(id);return '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;padding-bottom:12px;border-bottom:1px solid var(--cc-line)"><div><div style="font-weight:700;font-size:17px;color:var(--cc-blue-900)">'+esc(c.name)+'</div><div style="font-size:14px;color:var(--cc-ink-3);margin-top:2px">'+esc(sel[id].join(' · '))+'</div></div><button type="button" class="cc-x" data-rm="'+id+'" aria-label="Quitar" style="cursor:pointer;border:0;background:none;font-size:22px;line-height:1;color:var(--cc-ink-4)">×</button></div>'}).join('');
+ var ct=root.querySelector('#cc-count');if(ct)ct.textContent=n?'('+n+')':'';
+ var bar=$('#cc-bar');bar.hidden=!(n>0&&!sent&&barOn);bar.style.display=bar.hidden?'none':'flex';
+ $('#cc-bartxt').textContent=n+(n===1?' equipo seleccionado':' equipos seleccionados');
+}
+function render(){renderCards();renderSummary()}
+var barOn=true;
+
+function toggleSub(id,label){var cur=sel[id]||[];var nx=cur.indexOf(label)>-1?cur.filter(function(x){return x!==label}):cur.concat(label);if(nx.length)sel[id]=nx;else delete sel[id];track('cotizacion_equipo_agregado',{categoria:id,subtipo:label,total:count()});render()}
+
+function track(ev,d){try{window.dataLayer=window.dataLayer||[];window.dataLayer.push(Object.assign({event:ev},d||{}))}catch(e){}}
+function utm(){var o={};try{var p=new URLSearchParams(location.search);['utm_source','utm_medium','utm_campaign','utm_term','utm_content','gclid','fbclid'].forEach(function(k){if(p.get(k)){o[k]=p.get(k);try{sessionStorage.setItem('cc_'+k,o[k])}catch(e){}}else{try{var v=sessionStorage.getItem('cc_'+k);if(v)o[k]=v}catch(e){}}})}catch(e){}return o}
+function folio(){var d=new Date(),p=function(n){return String(n).padStart(2,'0')};return 'CC-'+String(d.getFullYear()).slice(2)+p(d.getMonth()+1)+p(d.getDate())+'-'+Math.random().toString(36).slice(2,6).toUpperCase()}
+function showErr(m){var e=$('#cc-err');e.textContent=m||'';e.hidden=!m}
+
+function submit(ev){
+ ev.preventDefault();if(sending)return;
+ var f=$('#cc-form'),v=function(n){return f.elements[n].value.trim()};
+ if(!count())return showErr('Selecciona al menos un equipo.');
+ if(!v('nombre')||!v('correo')||!v('telefono'))return showErr('Completa nombre, correo y teléfono.');
+ if(!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(v('correo')))return showErr('Revisa que tu correo sea válido.');
+ showErr('');
+ var list=ids(),fol=folio();
+ var payload=Object.assign({
+  folio:fol,nombre:v('nombre'),empresa:v('empresa'),correo:v('correo'),telefono:v('telefono'),mensaje:v('mensaje'),
+  website:v('website'),
+  equipos:list.map(function(id){return{categoria:find(id).name,subtipos:sel[id].slice()}}),
+  pagina:location.href.split('#')[0],fecha:new Date().toISOString()
+ },utm());
+ var btn=$('#cc-submit');sending=true;btn.disabled=true;btn.textContent='Enviando…';
+ var done=function(){
+  sending=false;btn.disabled=false;btn.textContent='Solicitar cotización';
+  sent=true;sentName=payload.nombre;sentFolio=fol;
+  sentCats=list.map(function(id){return find(id).name+' ('+sel[id].join(', ')+')'}).join('; ');
+  $('#cc-okh').textContent='Gracias, '+sentName;
+  $('#cc-okp').textContent='Un asesor te contactará con tu cotización de '+sentCats+'.';
+  f.hidden=true;f.style.display='none';var ok=$('#cc-ok');ok.hidden=false;ok.style.display='flex';
+  track('cotizacion_enviada',{folio:fol,equipos:count()});track('generate_lead',{folio:fol});
+  renderSummary();
+ };
+ var fail=function(){sending=false;btn.disabled=false;btn.textContent='Solicitar cotización';showErr('No pudimos enviar tu solicitud. Intenta de nuevo en un momento.')};
+ if(!CFG.EMAIL_ENDPOINT){console.warn('[Cotizador] Falta CC_CONFIG.EMAIL_ENDPOINT: la solicitud no se envió por correo.');return done()}
+ var body=JSON.stringify(payload);
+ fetch(CFG.EMAIL_ENDPOINT,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},body:body})
+  .then(function(r){return r.json()})
+  .then(function(j){j&&j.ok?done():fail()})
+  .catch(function(){
+    // respuesta ilegible (CORS): reintenta en modo opaco; el correo sí sale
+    fetch(CFG.EMAIL_ENDPOINT,{method:'POST',mode:'no-cors',headers:{'Content-Type':'text/plain;charset=utf-8'},body:body}).then(done,fail);
   });
+}
+function reset(){
+ sel={};sent=false;sentCats='';var f=$('#cc-form');f.reset();f.hidden=false;f.style.display='flex';var ok=$('#cc-ok');ok.hidden=true;ok.style.display='none';showErr('');render();
+}
 
-  /* ---------------- DATOS ---------------- */
-  var CATS = [
-    { id: 'aspiradoras', name: 'Aspiradoras', ic: 'vac', desc: 'Para polvo y líquidos, en uso ligero o industrial.', subs: ['Verticales', 'Húmedo / seco', 'Canasta', 'Mochila', 'Hombre atrás', 'Hombre a bordo'] },
-    { id: 'lava', name: 'Lava Alfombras', ic: 'rug', desc: 'Extracción y lavado profundo de alfombras y tapicería.', subs: ['Desmanchado', 'Encapsulado', 'Extractor mediano', 'Extractor grande', 'Hombre atrás', 'Hombre a bordo'] },
-    { id: 'restregadoras', name: 'Restregadoras', ic: 'scrub', desc: 'Lavan y secan pisos duros en una sola pasada.', subs: ['Vertical', 'Áreas reducidas', 'Hombre a bordo', 'Hombre atrás', 'Industriales'] },
-    { id: 'rotativos', name: 'Rotativos', ic: 'rot', desc: 'Pulido, abrillantado y mantenimiento de pisos.', subs: ['Pulidoras', 'Burnisher', 'Orbitales'] },
-    { id: 'barredoras', name: 'Barredoras', ic: 'sweep', desc: 'Barrido de áreas amplias, interiores y exteriores.', subs: ['Mecánicas', 'Hombre atrás', 'Hombre a bordo', 'Industriales'] },
-    { id: 'control', name: 'Control', ic: 'ctrl', desc: 'Equipos de control para tu operación de limpieza.', subs: ['Ctrl. de Humedad', 'Ctrl. de Olores', 'Ctrl. de Chicles'] }
-  ];
-  var BEN = [
-    ['equip', 'Equipos', 'Para cada superficie'], ['prod', 'Productos', 'Para cada limpieza'],
-    ['acc', 'Accesorios', 'Complementa tu equipo'], ['refac', 'Refacciones', 'Mantén tu operación'],
-    ['shield', 'Garantías', 'Respaldo en tu compra'], ['wrench', 'Servicio técnico', 'Mantenimiento y reparación'],
-    ['headset', 'Post venta', 'Seguimiento después de tu compra'], ['chat', 'Asesoría', 'Te ayudamos a elegir'],
-    ['grad', 'Capacitación', 'Para tu personal'], ['monitor', 'Capacitación virtual', 'Aprende a distancia']
-  ];
-  var IC = {
-    wrench: '<path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/>',
-    shield: '<path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/><path d="m9 12 2 2 4-4"/>',
-    equip: '<path d="M6 3l3 9"/><rect x="4" y="12" width="15" height="5" rx="2"/><circle cx="8" cy="19.5" r="1.5"/><circle cx="16" cy="19.5" r="1.5"/>',
-    prod: '<path d="M9 3h6v3l2 3v11a1 1 0 0 1-1 1H8a1 1 0 0 1-1-1V9l2-3z"/><path d="M9 14h6"/>',
-    acc: '<circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="2.5"/><path d="M12 4v3M12 17v3M4 12h3M17 12h3"/>',
-    refac: '<circle cx="12" cy="12" r="3"/><circle cx="12" cy="12" r="7.5"/><path d="M12 2v2.5M12 19.5V22M2 12h2.5M19.5 12H22"/>',
-    headset: '<path d="M4 15v-3a8 8 0 0 1 16 0v3"/><rect x="3" y="14" width="4" height="6" rx="1.5"/><rect x="17" y="14" width="4" height="6" rx="1.5"/>',
-    chat: '<path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12z"/><path d="M9 11h6M9 14h4"/>',
-    grad: '<path d="M2 9l10-5 10 5-10 5z"/><path d="M6 11v5c0 1.5 3 3 6 3s6-1.5 6-3v-5"/>',
-    monitor: '<rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/><path d="m10.5 8.2 4 2-4 2z"/>',
-    vac: '<rect x="4" y="9" width="12" height="8" rx="3"/><path d="M16 12c3 0 4-2 4-7"/><circle cx="8" cy="19.5" r="1.5"/><circle cx="14" cy="19.5" r="1.5"/>',
-    rug: '<rect x="3" y="14" width="18" height="6" rx="1.5"/><path d="M12 3s3.2 3.3 3.2 5.4a3.2 3.2 0 0 1-6.4 0C8.8 6.3 12 3 12 3z"/>',
-    scrub: '<path d="M6 3l3 9"/><rect x="4" y="12" width="15" height="5" rx="2"/><circle cx="8" cy="19.5" r="1.5"/><circle cx="16" cy="19.5" r="1.5"/>',
-    rot: '<circle cx="12" cy="12" r="3"/><path d="M20 12a8 8 0 0 0-14-5.3M4 12a8 8 0 0 0 14 5.3"/><path d="M6 3v4h4M18 21v-4h-4"/>',
-    sweep: '<path d="M15 3l-4 9"/><path d="M6 12h11l2 8H4z"/><path d="M9 16l-.8 4M12 16v4M15 16l.8 4"/>',
-    ctrl: '<path d="M4 7h9M17 7h3M4 17h3M11 17h9"/><circle cx="15" cy="7" r="2"/><circle cx="9" cy="17" r="2"/>'
-  };
-  function svg(k, s) {
-    return '<svg viewBox="0 0 24 24" width="' + s + '" height="' + s + '" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + IC[k] + '</svg>';
-  }
-
-  /* ---------------- helpers ---------------- */
-  var TPL = "<div id=\"cc-app\"> <header class=\"cc-hdr\" id=\"cc-hdr\" data-chrome> <a href=\"#cc-top\" aria-label=\"Clean Center\"><img id=\"cc-logo\" alt=\"Clean Center\"></a> <nav> <a class=\"cc-lnk cc-hide-sm\" href=\"#cc-solucion\">Somos</a> <a class=\"cc-lnk\" href=\"#cc-catalogo\">Equipos</a> <a class=\"cc-btn cc-btn-o cc-sm\" href=\"#cc-cotizar\">Cotizar <span id=\"cc-hcount\"></span></a> </nav> </header> <section class=\"cc-hero\" id=\"cc-top\"> <div class=\"cc-wrap cc-hgrid\"> <div> <span class=\"cc-pill\">Equipos · Catálogo 2026</span> <h1>El equipo <em>correcto</em> para tu limpieza</h1> <p class=\"cc-sub\">Elige los equipos que necesitas, déjanos tus datos y te enviamos tu cotización.</p> <div class=\"cc-cta\"> <a class=\"cc-btn cc-btn-o\" href=\"#cc-catalogo\">Elegir equipos <svg width=\"18\" height=\"18\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2.4\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M5 12h14M13 6l6 6-6 6\"/></svg></a> <a class=\"cc-btn cc-btn-g\" href=\"#cc-solucion\">Conoce la Solución 360</a> </div> <div class=\"cc-stats\"> <div><b>30</b><span>años en el mercado</span></div> <div><b>6</b><span>categorías de equipos</span></div> <div><b>360°</b><span>solución total de limpieza</span></div> </div> </div> <div class=\"cc-media\"> <div class=\"cc-vframe\"><video id=\"cc-video\" autoplay muted loop playsinline preload=\"metadata\"></video></div> <div class=\"cc-chip-f cc-chip-a\"><i data-ic=\"wrench\" data-s=\"20\"></i><div>Servicio técnico<small>y refacciones</small></div></div> <div class=\"cc-chip-f cc-chip-b\"><i data-ic=\"shield\" data-s=\"20\"></i><div>Garantía<small>en tu equipo</small></div></div> </div> </div> </section> <div class=\"cc-steps cc-rv\"> <ol> <li><i>1</i><div><b>Elige tus equipos</b><span>Una o varias categorías</span></div></li> <li><i>2</i><div><b>Déjanos tus datos</b><span>Nombre, correo y teléfono</span></div></li> <li><i>3</i><div><b>Recibe tu cotización</b><span>Un asesor te contacta</span></div></li> </ol> </div> <section class=\"cc-sec cc-s360\" id=\"cc-solucion\"> <div class=\"cc-wrap\"> <div class=\"cc-s360h cc-rv\"> <div> <span class=\"cc-pill\">Solución 360</span> <h2 class=\"cc-h2\">Mi solución <em>total</em> de limpieza</h2> </div> <div> <p>Un solo proveedor para todo el ciclo de limpieza. Además de equipos, te acompañamos con productos, accesorios, refacciones, garantías, servicio técnico, post venta, asesoría y capacitación. Tú eliges el equipo; nosotros respaldamos tu operación.</p> <a class=\"cc-btn cc-btn-b\" href=\"#cc-catalogo\">Ver equipos</a> </div> </div> <ul class=\"cc-360\" id=\"cc-360\"></ul> <div class=\"cc-logos\" id=\"cc-logos\" hidden></div> </div> </section> <section class=\"cc-sec cc-cat\" id=\"cc-catalogo\"> <div class=\"cc-wrap\"> <span class=\"cc-pill cc-pill-b\">Paso 1</span> <h2 class=\"cc-h2\">Selecciona tus equipos</h2> <p class=\"cc-lead\">Marca uno o varios equipos de cualquier categoría. Puedes combinar los que necesites.</p> <div class=\"cc-cards\" id=\"cc-cards\"></div> </div> </section> <section class=\"cc-sec cc-quote\" id=\"cc-cotizar\"> <div class=\"cc-wrap\"> <span class=\"cc-pill cc-pill-b\">Paso 2</span> <h2 class=\"cc-h2\">Solicita tu cotización</h2> <div class=\"cc-qgrid\"> <aside class=\"cc-sum\" aria-live=\"polite\"> <div class=\"cc-sum-h\"><b>Tu selección</b><span id=\"cc-scount\">0 equipos</span></div> <div class=\"cc-empty\" id=\"cc-empty\"> <svg width=\"40\" height=\"40\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.5\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M6 6h15l-1.6 8.2a2 2 0 01-2 1.6H8.6a2 2 0 01-2-1.6L4.4 3H2\"/><circle cx=\"9\" cy=\"20\" r=\"1.4\"/><circle cx=\"18\" cy=\"20\" r=\"1.4\"/></svg> Aún no has elegido equipos.<br><a href=\"#cc-catalogo\">Volver al catálogo</a> </div> <div class=\"cc-sl\" id=\"cc-sl\"></div> </aside> <div class=\"cc-fc\"> <div class=\"cc-ok\" id=\"cc-ok\" hidden tabindex=\"-1\"> <div class=\"cc-tick\"><svg width=\"42\" height=\"42\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2.6\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M5 12.5l4.5 4.5L19 7.5\"/></svg></div> <h3 id=\"cc-okname\"></h3> <p>Recibimos tu solicitud. Un asesor te contactará con tu cotización.</p> <span class=\"cc-folio\" id=\"cc-okfolio\"></span> <ul class=\"cc-ol\" id=\"cc-ol\"></ul> <button type=\"button\" class=\"cc-btn\" id=\"cc-reset\">Nueva cotización</button> </div> <form class=\"cc-form\" id=\"cc-form\" novalidate> <h3>Tus datos de contacto</h3> <label>Nombre <input name=\"nombre\" autocomplete=\"name\" placeholder=\"Tu nombre completo\"></label> <label>Empresa <input name=\"empresa\" autocomplete=\"organization\" placeholder=\"Nombre de tu empresa\"></label> <div class=\"cc-r2\"> <label>Correo <input name=\"correo\" type=\"email\" autocomplete=\"email\" placeholder=\"correo@empresa.com\"></label> <label>Teléfono <input name=\"telefono\" type=\"tel\" autocomplete=\"tel\" placeholder=\"55 0000 0000\"></label> </div> <label>Comentarios (opcional) <textarea name=\"mensaje\" rows=\"3\" placeholder=\"Cantidad, superficie a limpiar, uso…\"></textarea></label> <div class=\"cc-hp\" aria-hidden=\"true\"><label>No llenar <input name=\"website\" tabindex=\"-1\" autocomplete=\"off\"></label></div> <input type=\"hidden\" name=\"resumen\" id=\"cc-fres\"> <input type=\"hidden\" name=\"folio\" id=\"cc-ffol\"> <div class=\"cc-err\" id=\"cc-err\" role=\"alert\"></div> <button type=\"submit\" class=\"cc-btn cc-btn-o\" id=\"cc-submit\">Solicitar cotización <svg width=\"18\" height=\"18\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2.4\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M5 12h14M13 6l6 6-6 6\"/></svg></button> </form> </div> </div> </div> </section> <footer class=\"cc-foot\" id=\"cc-foot\" data-chrome> <div class=\"cc-wrap\"> <img id=\"cc-logow\" alt=\"Clean Center\"> <a href=\"https://www.cleancenter.com.mx\" rel=\"noopener\">WWW.CLEANCENTER.COM.MX</a> </div> </footer> <div class=\"cc-bar\" id=\"cc-bar\" hidden> <span id=\"cc-bartext\"></span> <a class=\"cc-btn cc-btn-o\" href=\"#cc-cotizar\">Cotizar</a> </div> </div>";
-  var $ = function (id) { return document.getElementById(id); };
-  function el(tag, props, kids) {
-    var e = document.createElement(tag), k;
-    for (k in (props || {})) { if (k === 'class') e.className = props[k]; else if (k === 'text') e.textContent = props[k]; else e.setAttribute(k, props[k]); }
-    (kids || []).forEach(function (c) { if (c) e.appendChild(typeof c === 'string' ? document.createTextNode(c) : c); });
-    return e;
-  }
-  function push(o) { (window.dataLayer = window.dataLayer || []).push(o); }
-  var EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
-
-  /* ---------------- estado ---------------- */
-  var sel = {}, sent = false, refs = {}, app, form, errBox, submitBtn;
-
-  function selected() {
-    return CATS.filter(function (c) { return sel[c.id] && sel[c.id].length; })
-      .map(function (c) { return { id: c.id, name: c.name, subs: sel[c.id].slice() }; });
-  }
-  function count() { return selected().reduce(function (t, c) { return t + c.subs.length; }, 0); }
-  function toggleSub(cat, label) {
-    var cur = sel[cat.id] || [], on = cur.indexOf(label) > -1;
-    var nx = on ? cur.filter(function (x) { return x !== label; }) : cur.concat(label);
-    nx.sort(function (a, b) { return cat.subs.indexOf(a) - cat.subs.indexOf(b); });
-    if (nx.length) sel[cat.id] = nx; else delete sel[cat.id];
-    if (!on) push({ event: 'cotizacion_equipo_agregado', categoria: cat.name, subtipo: label });
-    update();
-  }
-  function summaryText(folio, f) {
-    var L = [folio ? 'COTIZACIÓN ' + folio : 'COTIZACIÓN'];
-    if (f) {
-      L.push('Fecha: ' + new Date().toLocaleString('es-MX', { dateStyle: 'long', timeStyle: 'short' }));
-      L.push('Cliente: ' + f.nombre + (f.empresa ? ' · ' + f.empresa : ''));
-      L.push('Correo: ' + f.correo + ' · Tel: ' + f.telefono);
-      if (f.mensaje) L.push('Comentarios: ' + f.mensaje);
-    }
-    L.push('', 'Equipos solicitados (' + count() + '):');
-    selected().forEach(function (c) { L.push('• ' + c.name + ': ' + c.subs.join(', ')); });
-    return L.join('\n');
-  }
-
-  /* ---------------- construcción ---------------- */
-  function reveal(node) { node.classList.add('cc-rv'); }
-
-  function buildBenefits() {
-    var ul = $('cc-360');
-    BEN.forEach(function (b) {
-      var li = el('li'); reveal(li);
-      li.innerHTML = '<i>' + svg(b[0], 24) + '</i><b>' + b[1] + '</b><span>' + b[2] + '</span>';
-      ul.appendChild(li);
-    });
-  }
-
-  function buildCatalog() {
-    var host = $('cc-cards');
-    CATS.forEach(function (cat, i) {
-      var r = { subs: {} }, photo = CONFIG.IMAGES[cat.id];
-      var head = el('div', { 'class': 'cc-ch' + (photo ? ' ph' : '') });
-      if (photo) head.appendChild(el('img', { src: photo, alt: cat.name, loading: 'lazy' }));
-      var ico = el('div', { 'class': 'cc-ico' }); ico.innerHTML = svg(cat.ic, 34);
-      r.badge = el('span', { 'class': 'cc-bdg' });
-      head.appendChild(ico); head.appendChild(el('span', { 'class': 'cc-num', text: ('0' + (i + 1)).slice(-2) })); head.appendChild(r.badge);
-
-      var chips = el('div', { 'class': 'cc-chips' });
-      cat.subs.forEach(function (label) {
-        var mark = el('i', { 'aria-hidden': 'true', text: '+' });
-        var b = el('button', { type: 'button', 'class': 'cc-chip', 'aria-pressed': 'false' }, [mark, label]);
-        b.addEventListener('click', function () { toggleSub(cat, label); });
-        r.subs[label] = { b: b, mark: mark };
-        chips.appendChild(b);
-      });
-      r.card = el('article', { 'class': 'cc-card' }, [head,
-        el('div', { 'class': 'cc-cb' }, [el('h3', { text: cat.name }), el('p', { text: cat.desc }), chips])]);
-      reveal(r.card);
-      refs[cat.id] = r; host.appendChild(r.card);
-    });
-  }
-
-  function update() {
-    var n = count(), sl = selected();
-    CATS.forEach(function (cat) {
-      var r = refs[cat.id], k = (sel[cat.id] || []).length;
-      r.card.classList.toggle('on', k > 0);
-      r.badge.textContent = '✓ ' + k + (k === 1 ? ' elegido' : ' elegidos');
-      cat.subs.forEach(function (label) {
-        var on = (sel[cat.id] || []).indexOf(label) > -1, s = r.subs[label];
-        s.b.classList.toggle('on', on); s.b.setAttribute('aria-pressed', on ? 'true' : 'false'); s.mark.textContent = on ? '✓' : '+';
-      });
-    });
-    $('cc-hcount').textContent = n ? '(' + n + ')' : '';
-    $('cc-scount').textContent = n + (n === 1 ? ' equipo' : ' equipos');
-    $('cc-bartext').textContent = n + (n === 1 ? ' equipo seleccionado' : ' equipos seleccionados');
-    $('cc-empty').hidden = n > 0;
-    var list = $('cc-sl'); list.innerHTML = '';
-    sl.forEach(function (c) {
-      var rm = el('button', { type: 'button', 'aria-label': 'Quitar ' + c.name, text: '×' });
-      rm.addEventListener('click', function () { delete sel[c.id]; update(); });
-      list.appendChild(el('div', { 'class': 'cc-sr' }, [el('div', null, [el('b', { text: c.name }), el('span', { text: c.subs.join(' · ') })]), rm]));
-    });
-    $('cc-fres').value = summaryText('', null);
-    refreshBar();
-  }
-
-  var formInView = false;
-  function refreshBar() { $('cc-bar').hidden = !(count() > 0 && !sent && !formInView); }
-
-  /* ---------------- envío ---------------- */
-  function emailConfigured() { var e = CONFIG.NOTIFY_EMAIL || ''; return EMAIL_RE.test(e) || /^[a-f0-9]{32}$/i.test(e); }
-  function makeFolio() {
-    var d = new Date(), p = function (x) { return ('0' + x).slice(-2); };
-    return 'CC-' + String(d.getFullYear()).slice(2) + p(d.getMonth() + 1) + p(d.getDate()) + '-' + Math.random().toString(36).slice(2, 6).toUpperCase();
-  }
-  function utm() {
-    var o = {}, q = new URLSearchParams(location.search);
-    ['utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content', 'gclid', 'fbclid'].forEach(function (k) { if (q.get(k)) o[k] = q.get(k); });
-    return o;
-  }
-  function sendEmail(d, folio, text) {
-    var body = {
-      _subject: CONFIG.EMAIL_SUBJECT + ' · ' + folio + ' · ' + (d.empresa || d.nombre), _template: 'table', _captcha: 'false', _replyto: d.correo,
-      Folio: folio, Nombre: d.nombre, Empresa: d.empresa || '—', Correo: d.correo, 'Teléfono': d.telefono, Comentarios: d.mensaje || '—',
-      'Resumen de la cotización': text, 'Página': location.href
-    };
-    if (CONFIG.COPY_TO_CLIENT) body._cc = d.correo;
-    return fetch('https://formsubmit.co/ajax/' + encodeURIComponent(CONFIG.NOTIFY_EMAIL), {
-      method: 'POST', headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' }, body: JSON.stringify(body)
-    }).then(function (r) { return r.json().then(function (j) { if (!r.ok || String(j.success) !== 'true') throw new Error(j.message || 'email'); }); });
-  }
-  function sendWebhook(d, folio, text) {
-    var p = new URLSearchParams(), k;
-    var base = { folio: folio, fecha: new Date().toISOString(), nombre: d.nombre, empresa: d.empresa, correo: d.correo, telefono: d.telefono,
-      comentarios: d.mensaje, resumen: text, equipos: JSON.stringify(selected()),
-      equipos_texto: selected().map(function (c) { return c.name + ': ' + c.subs.join(', '); }).join(' | '), pagina: location.href };
-    var u = utm();
-    for (k in base) p.append(k, base[k] || '');
-    for (k in u) p.append(k, u[k]);
-    return fetch(CONFIG.WEBHOOK_URL, { method: 'POST', mode: 'no-cors', body: p });
-  }
-  function showErr(m) { errBox.textContent = m; errBox.classList.toggle('show', !!m); }
-
-  function onSubmit(e) {
-    e.preventDefault();
-    var f = {}; ['nombre', 'empresa', 'correo', 'telefono', 'mensaje', 'website'].forEach(function (k) { f[k] = (form.elements[k].value || '').trim(); });
-    showErr('');
-    if (!count()) return showErr('Selecciona al menos un equipo.');
-    if (!f.nombre || !f.correo || !f.telefono) return showErr('Completa nombre, correo y teléfono.');
-    if (!EMAIL_RE.test(f.correo)) return showErr('Revisa tu correo: parece incompleto.');
-    var folio = makeFolio(), text = summaryText(folio, f);
-    $('cc-ffol').value = folio; $('cc-fres').value = text;
-    if (f.website) return finish(f, folio);                       // honeypot: bot
-
-    var jobs = [];
-    if (emailConfigured()) jobs.push(sendEmail(f, folio, text));
-    if (CONFIG.WEBHOOK_URL) jobs.push(sendWebhook(f, folio, text));
-    if (!jobs.length) return showErr('El envío aún no está configurado. Avisa al administrador del sitio.');
-
-    var label = submitBtn.innerHTML;
-    submitBtn.disabled = true; submitBtn.textContent = 'Enviando…';
-    Promise.allSettled(jobs).then(function (rs) {
-      submitBtn.disabled = false; submitBtn.innerHTML = label;
-      if (rs.some(function (r) { return r.status === 'fulfilled'; })) {
-        push({ event: 'cotizacion_enviada', folio: folio, equipos_total: count(), categorias: selected().map(function (c) { return c.name; }) });
-        push({ event: 'generate_lead', value: count(), currency: 'MXN' });
-        finish(f, folio);
-      } else showErr('No pudimos enviar tu solicitud. Revisa tu conexión e inténtalo de nuevo.');
-    });
-  }
-  function finish(f, folio) {
-    sent = true; app.classList.add('cc-sent');
-    $('cc-okname').textContent = 'Gracias, ' + f.nombre;
-    $('cc-okfolio').textContent = 'Folio ' + folio;
-    var ol = $('cc-ol'); ol.innerHTML = '';
-    selected().forEach(function (c) { var li = el('li'); li.appendChild(el('b', { text: c.name + ': ' })); li.appendChild(document.createTextNode(c.subs.join(', '))); ol.appendChild(li); });
-    form.hidden = true; $('cc-ok').hidden = false; $('cc-ok').focus({ preventScroll: true });
-    $('cc-ok').scrollIntoView({ behavior: 'smooth', block: 'center' });
-    refreshBar();
-  }
-
-  /* ---------------- arranque ---------------- */
-  function init() {
-    var mount = $('cc-mount');
-    if (!mount) {
-      mount = el('div', { id: 'cc-mount' });
-      if (SCRIPT && SCRIPT.parentNode) SCRIPT.parentNode.insertBefore(mount, SCRIPT); else document.body.appendChild(mount);
-    }
-    if (CONFIG.LOAD_FONTS && !$('cc-fonts')) {
-      document.head.appendChild(el('link', { id: 'cc-fonts', rel: 'stylesheet', href: 'https://fonts.googleapis.com/css2?family=Lato:wght@400;700&family=Montserrat:wght@600;700;800&display=swap' }));
-    }
-    mount.innerHTML = TPL;
-    app = $('cc-app'); app.classList.add('cc-js');
-    form = $('cc-form'); errBox = $('cc-err'); submitBtn = $('cc-submit');
-
-    // iconos sueltos
-    [].forEach.call(app.querySelectorAll('[data-ic]'), function (n) { n.innerHTML = svg(n.getAttribute('data-ic'), +n.getAttribute('data-s') || 22); });
-    // logos, video, header/footer
-    var A = CONFIG.ASSETS;
-    if (A.logo) $('cc-logo').src = A.logo; if (A.logoWhite) $('cc-logow').src = A.logoWhite;
-    var v = $('cc-video');
-    if (A.poster) v.poster = A.poster;
-    if (A.video) { v.src = A.video; v.muted = true; var pr = v.play && v.play(); if (pr && pr.catch) pr.catch(function () {}); } else if (!A.poster) v.remove();
-    if (!CONFIG.SHOW_HEADER_FOOTER) [].forEach.call(app.querySelectorAll('[data-chrome]'), function (n) { n.hidden = true; });
-    if (CONFIG.LOGOS.length) { var lg = $('cc-logos'); CONFIG.LOGOS.forEach(function (s) { lg.appendChild(el('img', { src: s, alt: '', loading: 'lazy' })); }); lg.hidden = false; }
-
-    buildBenefits(); buildCatalog(); update();
-
-    form.addEventListener('submit', onSubmit);
-    $('cc-reset').addEventListener('click', function () {
-      sel = {}; sent = false; app.classList.remove('cc-sent'); form.reset(); showErr(''); $('cc-ok').hidden = true; form.hidden = false; update();
-      $('cc-catalogo').scrollIntoView({ behavior: 'smooth' });
-    });
-    app.addEventListener('click', function (e) {
-      var a = e.target.closest && e.target.closest('a[href^="#cc-"]'); if (!a) return;
-      var t = $(a.getAttribute('href').slice(1)); if (!t) return;
-      e.preventDefault(); t.scrollIntoView({ behavior: 'smooth' });
-    });
-
-    if ('IntersectionObserver' in window) {
-      new IntersectionObserver(function (es) { formInView = es[0].isIntersecting; refreshBar(); }, { threshold: 0.2 }).observe(form.parentNode);
-      var io = new IntersectionObserver(function (es) { es.forEach(function (x) { if (x.isIntersecting) { x.target.classList.add('cc-in'); io.unobserve(x.target); } }); }, { threshold: 0.12 });
-      [].forEach.call(app.querySelectorAll('.cc-rv'), function (n) { io.observe(n); });
-    } else { [].forEach.call(app.querySelectorAll('.cc-rv'), function (n) { n.classList.add('cc-in'); }); }
-  }
-  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init); else init();
+function init(){
+ var m=document.querySelector(CFG.MOUNT);
+ if(!m){console.warn('[Cotizador] No existe '+CFG.MOUNT);return}
+ if(CFG.LOAD_FONTS&&!document.getElementById('cc-fonts')){var l=document.createElement('link');l.id='cc-fonts';l.rel='stylesheet';l.href='https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700;800&family=Inter:wght@400;500;600;700&display=swap';document.head.appendChild(l)}
+ m.innerHTML='<div id="cc-app">'+shell()+'</div>';
+ root=m.firstChild;
+ $('#cc-ok').style.display='none';$('#cc-bar').style.display='none';
+ root.addEventListener('click',function(e){
+  var t=e.target.closest('[data-s]');if(t)return toggleSub(t.getAttribute('data-c'),t.getAttribute('data-s'));
+  t=e.target.closest('[data-rm]');if(t){delete sel[t.getAttribute('data-rm')];return render()}
+  t=e.target.closest('#cc-reset');if(t)return reset();
+  t=e.target.closest('a[href^="#"]');
+  if(t){var id=t.getAttribute('href').slice(1),el=id&&root.querySelector('#'+id);if(el){e.preventDefault();el.scrollIntoView({behavior:'smooth',block:'start'})}}
+ });
+ $('#cc-form').addEventListener('submit',submit);
+  var v=root.querySelector('video');if(v){v.muted=true;v.play&&v.play().catch(function(){})}
+ render();
+}
+if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',init);else init();
 })();
