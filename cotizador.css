@@ -21,3 +21,7 @@
 #cc-app input:focus,#cc-app textarea:focus{border-color:var(--cc-blue)!important}
 #cc-app .cc-hover-o:hover{background:var(--cc-orange-600)!important}
 #cc-app [disabled]{opacity:.7;cursor:wait!important}
+/* Blindaje contra estilos globales del sitio anfitrión (Webflow): fuente, alineación y sangrías */
+#cc-app,#cc-app *{font-family:var(--cc-font-sans);text-indent:0}
+#cc-app h1,#cc-app h2,#cc-app h3,#cc-app p,#cc-app label,#cc-app ul,#cc-app ol,#cc-app li,#cc-app div,#cc-app span,#cc-app section,#cc-app article,#cc-app form,#cc-app nav{text-align:left;padding-left:0;padding-right:0;padding-top:0;padding-bottom:0}
+#cc-app h1,#cc-app h2,#cc-app h3,#cc-app p{float:none;width:auto;max-width:none;text-shadow:none;text-decoration:none}
