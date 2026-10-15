@@ -13,7 +13,10 @@
 #cc-app .cc-slot svg{opacity:.45}
 #cc-app .cc-slot span{max-width:90%;font-weight:500;letter-spacing:.01em;opacity:.75;font-size:13px;line-height:1.2}
 #cc-app .cc-slot img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
+#cc-app .cc-slot.cc-has{padding:0;background:#fff}
 #cc-app .cc-slot.cc-has::before{display:none}
+#cc-app .cc-slot.cc-cover img{object-position:center 30%}
+#cc-app .cc-slot:not(.cc-cover) img{object-fit:contain}
 #cc-app .cc-sub-btn:focus-visible,#cc-app .cc-x:focus-visible{outline:2px solid var(--cc-orange);outline-offset:2px}
 #cc-app input:focus,#cc-app textarea:focus{border-color:var(--cc-blue)!important}
 #cc-app .cc-hover-o:hover{background:var(--cc-orange-600)!important}

@@ -13,6 +13,8 @@ var cs=document.currentScript,BASE='';
 if(cs&&cs.src)BASE=cs.src.replace(/[^\/]*$/,'');
 var A={logo:BASE+'assets/logo.png',logoW:BASE+'assets/logo-blanco.png',diagram:BASE+'assets/solucion-total.png',video:BASE+'assets/hero.mp4',poster:BASE+'assets/poster.jpg'};
 Object.assign(A,CFG.ASSETS||{});
+var IMG_DEFAULT={"cat-aspiradoras":"cat-aspiradoras.jpg","cat-lava":"cat-lava.jpg","cat-restregadoras":"cat-restregadoras.jpg","cat-rotativos":"cat-rotativos.jpg","cat-barredoras":"cat-barredoras.jpg","cat-control":"cat-control.jpg","sub-aspiradoras-verticales":"sub-aspiradoras-verticales.webp","sub-aspiradoras-h-medo-seco":"sub-aspiradoras-h-medo-seco.webp","sub-aspiradoras-canasta":"sub-aspiradoras-canasta.webp","sub-aspiradoras-mochila":"sub-aspiradoras-mochila.webp","sub-aspiradoras-hombre-atr-s":"sub-aspiradoras-hombre-atr-s.webp","sub-aspiradoras-hombre-a-bordo":"sub-aspiradoras-hombre-a-bordo.webp","sub-lava-desmanchado":"sub-lava-desmanchado.webp","sub-lava-encapsulado":"sub-lava-encapsulado.webp","sub-lava-extractor-mediano":"sub-lava-extractor-mediano.webp","sub-lava-extractor-grande":"sub-lava-extractor-grande.webp","sub-lava-hombre-atr-s":"sub-lava-hombre-atr-s.webp","sub-lava-hombre-a-bordo":"sub-lava-hombre-a-bordo.webp","sub-restregadoras-vertical":"sub-restregadoras-vertical.webp","sub-restregadoras--reas-reducidas":"sub-restregadoras--reas-reducidas.webp","sub-restregadoras-hombre-a-bordo":"sub-restregadoras-hombre-a-bordo.webp","sub-restregadoras-hombre-atr-s":"sub-restregadoras-hombre-atr-s.webp","sub-restregadoras-industriales":"sub-restregadoras-industriales.webp","sub-rotativos-pulidoras":"sub-rotativos-pulidoras.webp","sub-rotativos-burnisher":"sub-rotativos-burnisher.webp","sub-rotativos-orbitales":"sub-rotativos-orbitales.webp","sub-barredoras-mec-nicas":"sub-barredoras-mec-nicas.webp","sub-barredoras-hombre-atr-s":"sub-barredoras-hombre-atr-s.webp","sub-barredoras-hombre-a-bordo":"sub-barredoras-hombre-a-bordo.webp","sub-barredoras-industriales":"sub-barredoras-industriales.webp","sub-control-ctrl-de-humedad":"sub-control-ctrl-de-humedad.webp","sub-control-ctrl-de-olores":"sub-control-ctrl-de-olores.webp","sub-control-ctrl-de-chicles":"sub-control-ctrl-de-chicles.webp"};
+function imgUrl(id){var u=(CFG.IMAGES||{})[id];if(u)return u;var f=IMG_DEFAULT[id];return f?BASE+'assets/img/'+f:''}
 
 var CATS=[
  {id:'aspiradoras',name:'Aspiradoras',desc:'Para polvo y líquidos, en uso ligero o industrial.',subs:['Verticales','Húmedo / seco','Canasta','Mochila','Hombre atrás','Hombre a bordo']},
@@ -32,8 +34,8 @@ function ids(){return CATS.filter(function(c){return sel[c.id]}).map(function(c)
 
 var ICON='<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m21 15-5-5L5 21"/></svg>';
 function slot(id,label,style){
-  var u=(CFG.IMAGES||{})[id];
-  if(u)return '<div class="cc-slot cc-has" style="'+style+'"><img src="'+esc(u)+'" alt="'+esc(label)+'" loading="lazy"></div>';
+  var u=imgUrl(id);
+  if(u)return '<div class="cc-slot cc-has'+(id.indexOf('cat-')===0?' cc-cover':'')+'" style="'+style+'"><img src="'+esc(u)+'" alt="'+esc(label)+'" loading="lazy"></div>';
   return '<div class="cc-slot" style="'+style+'">'+ICON+'<span>'+esc(label)+'</span></div>';
 }
 
