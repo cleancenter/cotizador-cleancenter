@@ -26,3 +26,7 @@
 #cc-app *{font-family:inherit;text-indent:0}
 #cc-app h1,#cc-app h2,#cc-app h3,#cc-app p,#cc-app label,#cc-app ul,#cc-app ol,#cc-app li,#cc-app div,#cc-app span,#cc-app section,#cc-app article,#cc-app form,#cc-app nav{text-align:left;padding-left:0;padding-right:0;padding-top:0;padding-bottom:0}
 #cc-app h1,#cc-app h2,#cc-app h3,#cc-app p{float:none;width:auto;max-width:none;text-shadow:none;text-decoration:none}
+
+#cc-app .cc-fade{-webkit-mask-image:linear-gradient(90deg,transparent,#000 8%,#000 92%,transparent);mask-image:linear-gradient(90deg,transparent,#000 8%,#000 92%,transparent)}
+#cc-app .cc-marq:hover{animation-play-state:paused!important}
+@media (prefers-reduced-motion:reduce){#cc-app .cc-marq{animation:none!important}}

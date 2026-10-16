@@ -4,7 +4,7 @@ var CFG=Object.assign({
   EMAIL_ENDPOINT:'',        // URL del Web App de Google Apps Script (ver LEEME)
   SHOW_HEADER_FOOTER:true,  // false en Webflow si el sitio ya trae header/footer
   LOAD_FONTS:true,          // carga Barlow Condensed + Inter desde Google Fonts
-  LOGOS:[],                 // URLs de logos de clientes (franja animada). Vacío = no se muestra
+  LOGOS:null,               // null = logos incluidos; [] = ocultar franja; o lista de URLs propias
   IMAGES:{},                // fotos: {'cat-aspiradoras':'url', 'sub-aspiradoras-verticales':'url'}
   MOUNT:'#cc-mount'
 },window.CC_CONFIG||{});
@@ -45,11 +45,13 @@ var L={
  inp:'font:inherit;font-weight:400;font-size:16px;padding:14px 16px;border:1px solid var(--cc-line);border-radius:12px;outline:none;color:var(--cc-ink)'
 };
 
+var LOGO_DEFAULT=[["logo-01.webp","Grupo Vidanta"],["logo-02.webp","Cinépolis"],["logo-03.webp","Hilton"],["logo-04.webp","Hyatt"],["logo-05.webp","Instituto de Posgrados y Ciencias"],["logo-06.webp","ITESO"],["logo-07.webp","Palace Resorts"],["logo-08.webp","RCD Hotels"],["logo-09.webp","JW Marriott"],["logo-10.webp","PiSA Farmacéutica"],["logo-11.webp","Tecnológico de Monterrey"]];
 function logosHTML(){
-  var l=CFG.LOGOS||[];if(!l.length)return '';
-  var item=function(u){return '<img src="'+esc(u)+'" alt="" style="flex:none;height:72px;width:auto;max-width:180px;object-fit:contain">'};
-  var row=l.map(item).join('');
-  return '<section style="padding:48px 0;background:#fff;border-bottom:1px solid var(--cc-line-soft);overflow:hidden"><div style="text-align:center;'+L.lbl+'color:var(--cc-ink-3);margin:0 20px 28px">Empresas que confían en Clean Center · 30 años en el mercado</div><div style="display:flex;width:max-content;gap:24px;animation:ccmarquee 40s linear infinite;padding-left:24px">'+row+row+'</div></section>';
+  var l=CFG.LOGOS;
+  var items=(l===null||l===undefined)?LOGO_DEFAULT.map(function(x){return{u:BASE+'assets/logos/'+x[0],a:x[1]}}):l.map(function(u){return typeof u==='string'?{u:u,a:''}:u});
+  if(!items.length)return '';
+  var one=items.map(function(it){return '<div style="flex:none;width:180px;height:72px;margin-right:24px;display:flex;align-items:center;justify-content:center"><img src="'+esc(it.u)+'" alt="'+esc(it.a)+'" draggable="false" style="width:auto;height:auto;max-width:170px;max-height:64px"></div>'}).join('');
+  return '<section style="padding:48px 0;background:#fff;border-bottom:1px solid var(--cc-line-soft);overflow:hidden"><div style="text-align:center;'+L.lbl+'color:var(--cc-ink-3);margin:0 20px 28px">Empresas que confían en Clean Center · 30 años en el mercado</div><div class="cc-fade"><div class="cc-marq" style="display:flex;width:max-content;animation:ccmarquee 45s linear infinite">'+one+one+'</div></div></section>';
 }
 
 function shell(){
